@@ -9,8 +9,21 @@ services:
     ports:
       - "5432:5432"
 
+  app:
+    image: cu-app:latest
+    restart: always
+    depends_on:
+      - db
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/cu-dev
+      SPRING_DATASOURCE_USERNAME: cu-admin
+      SPRING_DATASOURCE_PASSWORD: mypassword
+    ports:
+      - "8080:8080"
+
   adminer:
     image: adminer:latest
     restart: always
     ports:
-      - "8080:8080"
+      - "8888:8080"
