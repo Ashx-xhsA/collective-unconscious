@@ -47,6 +47,8 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            set -e
+            
             docker pull zhanyichen/cu-app:latest
             docker stop cu-app || true
             docker rm cu-app || true
@@ -56,4 +58,18 @@ jobs:
               -p 8080:8080 \
               --restart unless-stopped \
               zhanyichen/cu-app:latest
-            docker image prune -f
+            
+            echo "Waiting for app to become healthy..."
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:8080/actuator/health | grep -q '"UP"'; then
+                echo "Health check passed after ${i} attempts"
+                docker image prune -f
+                exit 0
+              fi
+              echo "Attempt ${i}/30: not ready yet, waiting 2s..."
+              sleep 2
+            done
+              
+              echo "Health check FAILED after 60s. Container logs:"
+              docker logs cu-app --tail 100
+              exit 1
