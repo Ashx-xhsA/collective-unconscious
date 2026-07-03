@@ -39,3 +39,21 @@ jobs:
         run: |
           docker push zhanyichen/cu-app:${{ github.sha }}
           docker push zhanyichen/cu-app:latest
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker pull zhanyichen/cu-app:latest
+            docker stop cu-app || true
+            docker rm cu-app || true
+            docker run -d \
+              --name cu-app \
+              --env-file ~/.env \
+              -p 8080:8080 \
+              --restart unless-stopped \
+              zhanyichen/cu-app:latest
+            docker image prune -f
