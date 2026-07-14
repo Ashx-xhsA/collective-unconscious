@@ -48,9 +48,12 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
-            
+
+            # 1) Private network (idempotent: "already exists" must not fail the script).
             docker network create cu-net || true
-            
+
+            # 2) Redis, joined to the network. Only start it if it isn't already running,
+            #    so a redeploy never kicks logged-in users off by restarting Redis.
             if [ -z "$(docker ps -q -f name=cu-redis)" ]; then
               docker run -d \
                 --name cu-redis \
@@ -58,34 +61,73 @@ jobs:
                 --restart unless-stopped \
                 --memory 128m \
                 redis:alpine redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
-              fi
-                        
-            
-            
+            fi
+
+            # 3) Remember the image the CURRENT cu-app runs — this is our rollback target.
+            #    Empty on the very first deploy (no container yet); handled below.
+            PREVIOUS_IMAGE="$(docker inspect --format '{{.Image}}' cu-app 2>/dev/null || true)"
+
+            # 4) Pull the new image we just built and pushed.
             docker pull zhanyichen/cu-app:latest
-            docker stop cu-app || true
-            docker rm cu-app || true
-            docker run -d \
-              --name cu-app \
-              --network cu-net \
-              --env-file ~/.env \
-              -e REDIS_HOST=cu-redis \
-              -e REDIS_PORT=6379 \
-              -p 8080:8080 \
-              --restart unless-stopped \
-              zhanyichen/cu-app:latest
-            
-            echo "Waiting for app to become healthy..."
-            for i in $(seq 1 30); do
-              if curl -sf http://localhost:8080/actuator/health | grep -q '"UP"'; then
-                echo "Health check passed after ${i} attempts"
-                docker image prune -f
-                exit 0
-              fi
-              echo "Attempt ${i}/30: not ready yet, waiting 2s..."
-              sleep 2
-            done
-              
-              echo "Health check FAILED after 60s. Container logs:"
-              docker logs cu-app --tail 100
+
+            # Helper: (re)start cu-app from a given image ref on :8080.
+            # JAVA_TOOL_OPTIONS is set here with -e so it OVERRIDES the value in ~/.env:
+            # MaxMetaspaceSize 96M -> 128M. The extra classes from Spring Session + Redis
+            # overflowed the old 96M metaspace and OOM-killed the app; 128M gives headroom.
+            run_app() {
+              docker rm -f cu-app || true
+              docker run -d \
+                --name cu-app \
+                --network cu-net \
+                --env-file ~/.env \
+                -e REDIS_HOST=cu-redis \
+                -e REDIS_PORT=6379 \
+                -e JAVA_TOOL_OPTIONS="-XX:ReservedCodeCacheSize=64M -XX:MaxMetaspaceSize=128M" \
+                -p 8080:8080 \
+                --restart unless-stopped \
+                "$1"
+            }
+
+            # Helper: poll /actuator/health for up to 60s. Returns 0 if it goes UP, 1 otherwise.
+            wait_healthy() {
+              for i in $(seq 1 30); do
+                if curl -sf http://localhost:8080/actuator/health | grep -q '"UP"'; then
+                  echo "Health check passed after ${i} attempts"
+                  return 0
+                fi
+                echo "Attempt ${i}/30: not ready yet, waiting 2s..."
+                sleep 2
+              done
+              return 1
+            }
+
+            # 5) Deploy the new version.
+            echo "Deploying new image..."
+            run_app zhanyichen/cu-app:latest
+
+            if wait_healthy; then
+              echo "New version is healthy. Deploy succeeded."
+              docker image prune -f
+              exit 0
+            fi
+
+            # 6) New version failed its health check. Show why, then try to roll back.
+            echo "New version FAILED health check. Container logs:"
+            docker logs cu-app --tail 100
+
+            if [ -z "$PREVIOUS_IMAGE" ]; then
+              echo "No previous image recorded (first deploy?) — cannot roll back."
               exit 1
+            fi
+
+            echo "Rolling back to previous image: $PREVIOUS_IMAGE"
+            run_app "$PREVIOUS_IMAGE"
+            if wait_healthy; then
+              echo "Rollback succeeded — site restored to the previous working version."
+              # Still fail the job so we KNOW the new version did not ship.
+              exit 1
+            fi
+
+            echo "Rollback ALSO failed — site may be down. Previous image logs:"
+            docker logs cu-app --tail 100
+            exit 1
