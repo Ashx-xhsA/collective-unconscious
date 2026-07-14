@@ -1,4 +1,5 @@
-HELP.md
+# Local-only working docs (design notes, runbooks, test plans, reminders)
+docs/
 target/
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/

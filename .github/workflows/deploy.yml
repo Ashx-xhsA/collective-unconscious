@@ -49,12 +49,28 @@ jobs:
           script: |
             set -e
             
+            docker network create cu-net || true
+            
+            if [ -z "$(docker ps -q -f name=cu-redis)" ]; then
+              docker run -d \
+                --name cu-redis \
+                --network cu-net \
+                --restart unless-stopped \
+                --memory 128m \
+                redis:alpine redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
+              fi
+                        
+            
+            
             docker pull zhanyichen/cu-app:latest
             docker stop cu-app || true
             docker rm cu-app || true
             docker run -d \
               --name cu-app \
+              --network cu-net \
               --env-file ~/.env \
+              -e REDIS_HOST=cu-redis \
+              -e REDIS_PORT=6379 \
               -p 8080:8080 \
               --restart unless-stopped \
               zhanyichen/cu-app:latest
