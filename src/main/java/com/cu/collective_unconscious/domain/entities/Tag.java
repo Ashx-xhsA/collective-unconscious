@@ -1,9 +1,12 @@
 package com.cu.collective_unconscious.domain.entities;
 
+import org.hibernate.annotations.Formula;
+
 import jakarta.persistence.*;
 import lombok.*;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -22,6 +25,12 @@ public class Tag {
 
   @Column(nullable = false, unique = true)
   private String name;
+
+  @ManyToMany(mappedBy = "tags")
+  private Set<Work> works = new HashSet<>();
+
+  @Formula("(select count(*) from work_tags wt where wt.tag_id = id)")
+  private long workCount;
 
   // Custom equals/hashCode implementation needed instead of Lombok's
   // to avoid issues with JPA entity lifecycle management
