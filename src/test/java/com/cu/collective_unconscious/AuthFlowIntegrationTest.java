@@ -22,7 +22,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
+import com.cu.collective_unconscious.repository.ContributionRepository;
 import com.cu.collective_unconscious.repository.UserRepository;
+import com.cu.collective_unconscious.repository.WorkRepository;
 import tools.jackson.databind.ObjectMapper;
 
 /**
@@ -41,10 +43,17 @@ class AuthFlowIntegrationTest {
 
   @Autowired MockMvc mockMvc;
   @Autowired UserRepository userRepository;
+  @Autowired WorkRepository workRepository;
+  @Autowired ContributionRepository contributionRepository;
   @Autowired ObjectMapper objectMapper;
 
   @BeforeEach
   void clean() {
+    // FK order: contributions -> works (clears work_authors/work_tags) -> users. Maven Surefire's
+    // default runOrder doesn't guarantee this class runs before Work/ContributionFlowIntegrationTest,
+    // so leftover rows from those suites must not break a plain userRepository.deleteAll() here.
+    contributionRepository.deleteAll();
+    workRepository.deleteAll();
     userRepository.deleteAll();
   }
 
