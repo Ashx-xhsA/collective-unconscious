@@ -24,6 +24,8 @@ import com.cu.collective_unconscious.domain.entities.enums.Role;
 import com.cu.collective_unconscious.repository.UserRepository;
 import com.cu.collective_unconscious.services.impl.UserServiceImpl;
 
+import jakarta.persistence.EntityNotFoundException;
+
 /**
  * Pure unit test for {@link UserServiceImpl}. Repository and password encoder are mocked, so this
  * verifies our business rules in isolation: required-field validation, uniqueness checks, password
@@ -142,8 +144,10 @@ class UserServiceImplTest {
     UUID id = UUID.randomUUID();
     when(userRepository.findById(id)).thenReturn(Optional.empty());
 
+    // A missing user is a 404: getById throws EntityNotFoundException, which ErrorController
+    // maps to NOT_FOUND. (This backs ContributionController resolving the logged-in principal.)
     assertThatThrownBy(() -> service.getById(id))
-        .isInstanceOf(IllegalStateException.class)
+        .isInstanceOf(EntityNotFoundException.class)
         .hasMessageContaining("User not found");
   }
 }

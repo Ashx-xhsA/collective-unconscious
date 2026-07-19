@@ -10,6 +10,7 @@ import com.cu.collective_unconscious.domain.entities.enums.Role;
 import com.cu.collective_unconscious.repository.UserRepository;
 import com.cu.collective_unconscious.services.UserService;
 
+import jakarta.persistence.EntityNotFoundException;
 import lombok.RequiredArgsConstructor;
 
 @Service
@@ -52,6 +53,6 @@ public class UserServiceImpl implements UserService {
   @Override
   public User getById(UUID id) {
     return userRepository.findById(id)
-        .orElseThrow(() -> new IllegalStateException("User not found: " + id));
+        .orElseThrow(() -> new EntityNotFoundException("User not found: " + id));
   }
 }
