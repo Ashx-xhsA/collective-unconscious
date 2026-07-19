@@ -4,6 +4,7 @@ import java.io.IOException;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -12,12 +13,14 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfToken;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.web.filter.OncePerRequestFilter;
+
+import com.cu.collective_unconscious.security.RestAuthenticationEntryPoint;
+import tools.jackson.databind.ObjectMapper;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -28,7 +31,8 @@ import jakarta.servlet.http.HttpServletResponse;
 @EnableWebSecurity
 public class SecurityConfig {
   @Bean
-  public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+  public SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                                 ObjectMapper objectMapper) throws Exception {
     // Session auth rides on the SESSION cookie, which the browser sends automatically on
     // cross-site requests — so CSRF protection is required. The token is stored in a
     // (non-HttpOnly) XSRF-TOKEN cookie the SPA reads and echoes back in the X-XSRF-TOKEN header.
@@ -54,6 +58,8 @@ public class SecurityConfig {
                     .requestMatchers("/api/auth/register",
                             "/api/auth/login").permitAll()
                     .requestMatchers("/").permitAll()
+                    .requestMatchers(HttpMethod.GET,"/api/v1/contributions/drafts").authenticated()
+                    .requestMatchers(HttpMethod.GET, "/api/v1/**").permitAll()
                     .requestMatchers("/api/admin/**").hasRole("ADMIN")
                     .anyRequest().authenticated()
             )
@@ -72,7 +78,7 @@ public class SecurityConfig {
             )
 
             .exceptionHandling(ex -> ex
-                    .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
+                    .authenticationEntryPoint(new RestAuthenticationEntryPoint(objectMapper))
             );
 
     return http.build();

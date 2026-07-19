@@ -1,0 +1,14 @@
+package com.cu.collective_unconscious.services;
+
+import com.cu.collective_unconscious.domain.entities.Tag;
+
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
+public interface TagService {
+  List<Tag> getTags();
+  List<Tag> createTags(Set<String> tagNames);
+  Tag getTagById(UUID id);
+  void deleteTag(UUID id);
+}

@@ -1,6 +1,7 @@
 package com.cu.collective_unconscious.controller;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -80,6 +81,21 @@ class ErrorControllerTest {
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.message").value("Validation failed"))
         .andExpect(jsonPath("$.errors[0].field").value("name"));
+  }
+
+  @Test
+  void unmappedPath_mapsTo404_notInternalServerError() throws Exception {
+    // No controller anywhere maps this path. Spring's own DispatcherServlet fallback raises
+    // NoResourceFoundException (a 404-classified ErrorResponseException) for it — that must not
+    // get swallowed by the generic Exception.class -> 500 handler above.
+    mockMvc.perform(get("/api/v1/this-route-does-not-exist"))
+        .andExpect(status().isNotFound());
+  }
+
+  @Test
+  void unmappedPath_viaPatch_mapsTo404() throws Exception {
+    mockMvc.perform(patch("/api/v1/this-route-does-not-exist"))
+        .andExpect(status().isNotFound());
   }
 
   @Test

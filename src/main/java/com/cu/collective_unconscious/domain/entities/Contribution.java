@@ -53,8 +53,9 @@ public class Contribution {
   private String content;
 
   // Per-work, append-only ordering. Unique with work_id (§2.4).
-  @Column(name = "sequence_number", nullable = false)
-  private int sequenceNumber;
+  // only generate when submit
+  @Column(name = "sequence_number", nullable = true)
+  private Integer sequenceNumber;
 
   // Logical delete: the row and its sequence_number are retained (§2.4, §7.1).
   @Column(nullable = false)
