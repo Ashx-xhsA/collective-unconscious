@@ -14,6 +14,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestController
 @ControllerAdvice
@@ -89,6 +90,21 @@ public class ErrorController {
     ApiErrorResponse error = ApiErrorResponse.builder()
             .status(HttpStatus.NOT_FOUND.value())
             .message(ex.getMessage())
+            .build();
+    return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+  }
+
+  /**
+   * Raised by DispatcherServlet's static-resource fallback when a request matches no controller
+   * mapping at all (wrong path, typo, or right path with an unsupported HTTP method). Spring
+   * already classifies this as a 404 (it's an {@code ErrorResponseException}); without this
+   * handler it would fall through to {@link #handleException} above and get misreported as 500.
+   */
+  @ExceptionHandler(NoResourceFoundException.class)
+  public ResponseEntity<ApiErrorResponse> handleNoResourceFoundException(NoResourceFoundException ex) {
+    ApiErrorResponse error = ApiErrorResponse.builder()
+            .status(HttpStatus.NOT_FOUND.value())
+            .message("No such endpoint")
             .build();
     return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
   }
