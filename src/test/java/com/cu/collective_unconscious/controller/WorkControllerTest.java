@@ -30,6 +30,7 @@ import com.cu.collective_unconscious.domain.entities.enums.Visibility;
 import com.cu.collective_unconscious.domain.entities.enums.WorkType;
 import com.cu.collective_unconscious.domain.entities.enums.WritingMode;
 import com.cu.collective_unconscious.repository.ContributionRepository;
+import com.cu.collective_unconscious.repository.TicketRepository;
 import com.cu.collective_unconscious.repository.TagRepository;
 import com.cu.collective_unconscious.repository.UserRepository;
 import com.cu.collective_unconscious.repository.WorkRepository;
@@ -54,12 +55,14 @@ class WorkControllerTest {
   @Autowired TagRepository tagRepository;
   @Autowired ContributionRepository contributionRepository;
   @Autowired UserRepository userRepository;
+  @Autowired TicketRepository ticketRepository;
   @Autowired ObjectMapper objectMapper;
 
   private User author;
 
   @BeforeEach
   void clean() {
+    ticketRepository.deleteAll();
     contributionRepository.deleteAll();
     workRepository.deleteAll();
     tagRepository.deleteAll();

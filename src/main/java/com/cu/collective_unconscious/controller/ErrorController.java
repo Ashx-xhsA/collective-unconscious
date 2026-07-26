@@ -85,6 +85,18 @@ public class ErrorController {
     return new ResponseEntity<>(error, HttpStatus.UNAUTHORIZED);
   }
 
+  /** "You are not allowed to do this" (wrong/missing invitation code, submitting another user's
+   * draft) -> 403. Distinct from 409 (state doesn't allow it) and 401 (not authenticated). */
+  @ExceptionHandler(org.springframework.security.access.AccessDeniedException.class)
+  public ResponseEntity<ApiErrorResponse> handleAccessDeniedException(
+      org.springframework.security.access.AccessDeniedException ex) {
+    ApiErrorResponse error = ApiErrorResponse.builder()
+            .status(HttpStatus.FORBIDDEN.value())
+            .message(ex.getMessage())
+            .build();
+    return new ResponseEntity<>(error, HttpStatus.FORBIDDEN);
+  }
+
   @ExceptionHandler(EntityNotFoundException.class)
   public ResponseEntity<ApiErrorResponse> handleEntityNotFoundException(EntityNotFoundException ex) {
     ApiErrorResponse error = ApiErrorResponse.builder()

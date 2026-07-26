@@ -118,16 +118,18 @@ public class Work {
   @Version
   private Long version;
 
+  // Proxy-safe identity equality: getId() (not the raw field, which is null on a lazy proxy) and a
+  // fixed class constant (not getClass(), which is the proxy class on a proxy).
   @Override
   public boolean equals(Object o) {
     if (this == o) return true;
     if (!(o instanceof Work work)) return false;
-    return id != null && id.equals(work.id);
+    return getId() != null && getId().equals(work.getId());
   }
 
   @Override
   public int hashCode() {
-    return getClass().hashCode();
+    return Work.class.hashCode();
   }
 
   @PrePersist

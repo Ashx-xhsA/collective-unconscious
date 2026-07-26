@@ -12,8 +12,10 @@ import com.cu.collective_unconscious.mappers.ContributionMapper;
 import com.cu.collective_unconscious.repository.ContributionRepository;
 import com.cu.collective_unconscious.repository.WorkRepository;
 import com.cu.collective_unconscious.services.ContributionService;
+import com.cu.collective_unconscious.services.TicketService;
 
 import org.springframework.data.domain.PageRequest;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +33,7 @@ public class ContributionServiceImpl implements ContributionService {
   private final ContributionRepository contributionRepository;
   private final ContributionMapper contributionMapper;
   private final WorkRepository workRepository;
+  private final TicketService ticketService;
 
   // readOnly = true keeps the Hibernate session open through the mapping below,
   // so contributionMapper can read work.getTitle() without LazyInitializationException.
@@ -90,11 +93,9 @@ public class ContributionServiceImpl implements ContributionService {
     return contributionMapper.toDraftDto(saved);
   }
 
-  // The single atomic entry point that turns a draft into formal, ordered content (§3.3) — the
-  // one seam future ticket/fencing validation will plug into.
+  // The single atomic entry point that turns a draft into formal, ordered content (§3.3).
   // TODO(concurrency): naive max+1 can collide under concurrent submits against the
   // (work_id, sequence_number) unique constraint; acceptable at this phase's low concurrency.
-  // TODO(auth): no ticket/fencing check yet — any logged-in user can submit any draft.
   @Transactional
   @Override
   public ContributionDraftDto submit(UUID id, User user) {
@@ -105,7 +106,19 @@ public class ContributionServiceImpl implements ContributionService {
       throw new IllegalStateException("Contribution is already submitted");
     }
 
+    // Only the draft's own author may submit it.
+    if (!contribution.getAuthor().equals(user)) {
+      throw new AccessDeniedException("You may only submit your own draft");
+    }
+
     Work work = contribution.getWork();
+
+    // Ticket fencing: confirm the caller holds the ACTIVE, unexpired ticket, then consume it,
+    // re-enqueue (RobinRound) and hand the turn onward — all in this same transaction, so if any
+    // later step throws, the consumption rolls back too. Done before the content work so a caller
+    // who isn't up doesn't waste it (throws 409 if it's not their turn).
+    ticketService.consumeActiveTicketForSubmit(work, user, contribution);
+
     validateContent(work, contribution.getTitle(), contribution.getContent());
 
     Integer maxSequence = contributionRepository.findMaxSequenceNumber(work);
