@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -33,6 +34,7 @@ import com.cu.collective_unconscious.repository.WorkRepository;
 import com.cu.collective_unconscious.services.impl.ContributionServiceImpl;
 
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 
 import jakarta.persistence.EntityNotFoundException;
 
@@ -47,6 +49,7 @@ class ContributionServiceImplTest {
   @Mock ContributionRepository contributionRepository;
   @Mock ContributionMapper contributionMapper;
   @Mock WorkRepository workRepository;
+  @Mock TicketService ticketService;
   @InjectMocks ContributionServiceImpl service;
 
   @Test
@@ -406,6 +409,57 @@ class ContributionServiceImplTest {
 
     assertThatThrownBy(() -> service.submit(id, author()))
         .isInstanceOf(EntityNotFoundException.class);
+  }
+
+  // --- submit: ticket seam + ownership (step 5) --------------------------------
+
+  @Test
+  void submit_notTheDraftAuthor_throwsAccessDenied_andConsumesNothing() {
+    Work work = work(WorkType.ARTICLE, 1000, 5, false);
+    User author = author();
+    User someoneElse = author(); // different random id
+    Contribution draft = draftOn(work, author);
+    when(contributionRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
+
+    assertThatThrownBy(() -> service.submit(draft.getId(), someoneElse))
+        .isInstanceOf(AccessDeniedException.class);
+
+    verify(ticketService, never()).consumeActiveTicketForSubmit(any(), any(), any());
+    verify(contributionRepository, never()).save(any());
+    assertThat(draft.isDraft()).isTrue(); // untouched
+  }
+
+  @Test
+  void submit_invokesTicketConsumeSeam_withWorkAuthorAndContribution() {
+    Work work = work(WorkType.ARTICLE, 1000, 5, false);
+    User author = author();
+    Contribution draft = draftOn(work, author);
+    when(contributionRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
+    when(contributionRepository.findMaxSequenceNumber(work)).thenReturn(null);
+    stubContributionSaveEcho();
+
+    service.submit(draft.getId(), author);
+
+    // The seam is the fencing/consume/re-enqueue/advance step, run inside submit's transaction.
+    verify(ticketService).consumeActiveTicketForSubmit(work, author, draft);
+  }
+
+  @Test
+  void submit_ticketSeamRejects_propagates_andDoesNotAssignSequenceOrSave() {
+    Work work = work(WorkType.ARTICLE, 1000, 5, false);
+    User author = author();
+    Contribution draft = draftOn(work, author);
+    when(contributionRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
+    // e.g. "it's not your turn / your ticket expired" -> 409 from the ticket service.
+    doThrow(new IllegalStateException("it is not your turn"))
+        .when(ticketService).consumeActiveTicketForSubmit(work, author, draft);
+
+    assertThatThrownBy(() -> service.submit(draft.getId(), author))
+        .isInstanceOf(IllegalStateException.class);
+
+    assertThat(draft.getSequenceNumber()).isNull();
+    assertThat(draft.isDraft()).isTrue();
+    verify(contributionRepository, never()).save(any());
   }
 
   // --- getContributionDtos (cursor list) + getContributionDto (single) ---------

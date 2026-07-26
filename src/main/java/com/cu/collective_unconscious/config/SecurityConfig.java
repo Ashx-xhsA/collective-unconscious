@@ -59,6 +59,9 @@ public class SecurityConfig {
                             "/api/auth/login").permitAll()
                     .requestMatchers("/").permitAll()
                     .requestMatchers(HttpMethod.GET,"/api/v1/contributions/drafts").authenticated()
+                    // "is it my turn" is caller-relative -> login-only; must precede the blanket
+                    // GET permitAll below, or it would fall through as public.
+                    .requestMatchers(HttpMethod.GET, "/api/v1/works/*/tickets/current").authenticated()
                     .requestMatchers(HttpMethod.GET, "/api/v1/**").permitAll()
                     .requestMatchers("/api/admin/**").hasRole("ADMIN")
                     .anyRequest().authenticated()

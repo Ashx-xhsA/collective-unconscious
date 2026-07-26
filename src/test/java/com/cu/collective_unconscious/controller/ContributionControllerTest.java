@@ -30,9 +30,11 @@ import com.cu.collective_unconscious.domain.entities.enums.Visibility;
 import com.cu.collective_unconscious.domain.entities.enums.WorkType;
 import com.cu.collective_unconscious.domain.entities.enums.WritingMode;
 import com.cu.collective_unconscious.repository.ContributionRepository;
+import com.cu.collective_unconscious.repository.TicketRepository;
 import com.cu.collective_unconscious.repository.UserRepository;
 import com.cu.collective_unconscious.repository.WorkRepository;
 import com.cu.collective_unconscious.security.UserDetail;
+import com.cu.collective_unconscious.services.TicketService;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -55,9 +57,19 @@ class ContributionControllerTest {
   @Autowired UserRepository userRepository;
   @Autowired ObjectMapper objectMapper;
   @Autowired JdbcTemplate jdbcTemplate;
+  @Autowired TicketService ticketService;
+  @Autowired TicketRepository ticketRepository;
+
+  // Give a user the ACTIVE ticket on an idle work so they may submit (post-step-5 fencing). On a
+  // fresh queue drawTicket auto-activates the drawn ticket.
+  private void giveActiveTicket(Work work, User user) {
+    ticketService.drawTicket(work.getId(), user, null);
+  }
 
   @BeforeEach
   void clean() {
+    // Tickets reference works + users, so they must go first or the deletes below hit FK violations.
+    ticketRepository.deleteAll();
     contributionRepository.deleteAll();
     workRepository.deleteAll();
     userRepository.deleteAll();
@@ -395,6 +407,7 @@ class ContributionControllerTest {
     User me = persistUser();
     Work work = persistWork(me);
     Contribution draft = persistDraft(work, me, "Chapter One", "some content");
+    giveActiveTicket(work, me);
 
     mockMvc.perform(post("/api/v1/contributions/" + draft.getId() + "/submit")
             .with(user(new UserDetail(me))).with(csrf()))
@@ -415,15 +428,20 @@ class ContributionControllerTest {
   @Test
   void submit_secondSubmission_assignsSequenceTwo() throws Exception {
     User me = persistUser();
+    User other = persistUser();
     Work work = persistWork(me);
     Contribution first = persistDraft(work, me, "Chapter One", "some content");
+    giveActiveTicket(work, me);
     mockMvc.perform(post("/api/v1/contributions/" + first.getId() + "/submit")
             .with(user(new UserDetail(me))).with(csrf()))
         .andExpect(status().isOk());
-    Contribution second = persistDraft(work, me, "Chapter Two", "more content");
+    // No two turns in a row: the second submission must come from a different author, who draws
+    // after `me` (the most recent) — then it gets sequence 2.
+    Contribution second = persistDraft(work, other, "Chapter Two", "more content");
+    giveActiveTicket(work, other);
 
     mockMvc.perform(post("/api/v1/contributions/" + second.getId() + "/submit")
-            .with(user(new UserDetail(me))).with(csrf()))
+            .with(user(new UserDetail(other))).with(csrf()))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.sequenceNumber").value(2));
   }
@@ -433,10 +451,13 @@ class ContributionControllerTest {
     User me = persistUser();
     Work work = persistWork(me);
     Contribution draft = persistDraft(work, me, "Chapter One", "some content");
+    giveActiveTicket(work, me);
     mockMvc.perform(post("/api/v1/contributions/" + draft.getId() + "/submit")
             .with(user(new UserDetail(me))).with(csrf()))
         .andExpect(status().isOk());
 
+    // Re-submitting the now-submitted contribution is rejected by the draft check (409), before
+    // the ticket seam is even reached.
     mockMvc.perform(post("/api/v1/contributions/" + draft.getId() + "/submit")
             .with(user(new UserDetail(me))).with(csrf()))
         .andExpect(status().isConflict());
@@ -447,8 +468,11 @@ class ContributionControllerTest {
     User me = persistUser();
     Work work = persistWork(me);
     Contribution draft = persistDraft(work, me, "Chapter One", "some content");
-    work.setCompleted(true);
-    workRepository.save(work);
+    giveActiveTicket(work, me); // hold the turn before the work closes, so we reach the completed check
+    // Drawing joins the ring (bumps work.version), so reload before mutating to avoid a stale save.
+    Work reloaded = workRepository.findById(work.getId()).orElseThrow();
+    reloaded.setCompleted(true);
+    workRepository.save(reloaded);
 
     mockMvc.perform(post("/api/v1/contributions/" + draft.getId() + "/submit")
             .with(user(new UserDetail(me))).with(csrf()))

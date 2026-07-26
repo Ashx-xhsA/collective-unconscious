@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import com.cu.collective_unconscious.domain.entities.User;
 import com.cu.collective_unconscious.domain.entities.enums.Role;
 import com.cu.collective_unconscious.repository.ContributionRepository;
+import com.cu.collective_unconscious.repository.TicketRepository;
 import com.cu.collective_unconscious.repository.TagRepository;
 import com.cu.collective_unconscious.repository.UserRepository;
 import com.cu.collective_unconscious.repository.WorkRepository;
@@ -49,10 +50,12 @@ class WorkFlowIntegrationTest {
   @Autowired TagRepository tagRepository;
   @Autowired ContributionRepository contributionRepository;
   @Autowired UserRepository userRepository;
+  @Autowired TicketRepository ticketRepository;
   @Autowired ObjectMapper objectMapper;
 
   @BeforeEach
   void clean() {
+    ticketRepository.deleteAll();
     contributionRepository.deleteAll();
     workRepository.deleteAll();
     tagRepository.deleteAll();

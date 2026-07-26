@@ -31,9 +31,11 @@ import com.cu.collective_unconscious.domain.entities.enums.Visibility;
 import com.cu.collective_unconscious.domain.entities.enums.WorkType;
 import com.cu.collective_unconscious.domain.entities.enums.WritingMode;
 import com.cu.collective_unconscious.repository.ContributionRepository;
+import com.cu.collective_unconscious.repository.TicketRepository;
 import com.cu.collective_unconscious.repository.UserRepository;
 import com.cu.collective_unconscious.repository.WorkRepository;
 import com.cu.collective_unconscious.security.UserDetail;
+import com.cu.collective_unconscious.services.TicketService;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -55,9 +57,13 @@ class ContributionFlowIntegrationTest {
   @Autowired UserRepository userRepository;
   @Autowired ObjectMapper objectMapper;
   @Autowired JdbcTemplate jdbcTemplate;
+  @Autowired TicketService ticketService;
+  @Autowired TicketRepository ticketRepository;
 
   @BeforeEach
   void clean() {
+    // Tickets reference works + users, so delete them first to avoid FK violations.
+    ticketRepository.deleteAll();
     contributionRepository.deleteAll();
     workRepository.deleteAll();
     userRepository.deleteAll();
@@ -116,7 +122,9 @@ class ContributionFlowIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.content").value("once upon a midnight dreary"));
 
-    // 3. Submit: draft flips false, sequence starts at 1, author joins the work.
+    // 3. Submit: post-step-5 this requires holding the ACTIVE ticket, so draw one first (idle
+    // queue -> auto-activated). Then draft flips false, sequence starts at 1, author joins the work.
+    ticketService.drawTicket(work.getId(), userRepository.findById(me.getId()).orElseThrow(), null);
     mockMvc.perform(post("/api/v1/contributions/" + contributionId + "/submit")
             .with(user(me)).with(csrf()))
         .andExpect(status().isOk())

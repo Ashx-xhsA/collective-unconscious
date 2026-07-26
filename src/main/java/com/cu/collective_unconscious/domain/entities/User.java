@@ -53,18 +53,20 @@ public class User {
   @Column(nullable = false)
   private LocalDateTime createdAt;
 
-  // Identity-based equals/hashCode: hashing mutable fields breaks Set membership
-  // once an entity is persisted/updated (User lives inside Work.authors as a Set).
+  // Identity-based equals/hashCode. Uses getId() (not the raw field) and a fixed class constant so
+  // it stays correct when the other object is a Hibernate lazy proxy: a proxy's id FIELD is null
+  // and its getClass() is the proxy class, so field-access equals / getClass() hashCode would both
+  // fail Set membership (User lives inside Work.authors as a Set).
   @Override
   public boolean equals(Object o) {
     if (this == o) return true;
     if (!(o instanceof User user)) return false;
-    return id != null && id.equals(user.id);
+    return getId() != null && getId().equals(user.getId());
   }
 
   @Override
   public int hashCode() {
-    return getClass().hashCode();
+    return User.class.hashCode();
   }
 
   @PrePersist
