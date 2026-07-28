@@ -50,7 +50,8 @@ public class TicketServiceImpl implements TicketService {
   @Transactional
   @Override
   public TicketDto drawTicket(UUID workId, User user, String accessCode) {
-    Work work = workRepository.findById(workId)
+    // Lock the aggregate root first: all ticket-state ops on this work serialize on this row.
+    Work work = workRepository.findByIdForUpdate(workId)
         .orElseThrow(() -> new EntityNotFoundException("Work not found with id " + workId));
 
     if (work.isCompleted()) {
@@ -98,23 +99,24 @@ public class TicketServiceImpl implements TicketService {
     return ticketMapper.toDto(ticket);
   }
 
-  @Transactional
+  // Pure read， a just-expired ticket may show stale for ≤1 sweep (≤60s).
+  @Transactional(readOnly = true)
   @Override
   public List<TicketDto> listTickets(UUID workId) {
     Work work = workRepository.findById(workId)
         .orElseThrow(() -> new EntityNotFoundException("Work not found with id " + workId));
-    advance(work); // self-heal timeouts on read (backstop path 2)
     return ticketRepository.findByWorkWithHolderOrderByTicketNumberAsc(work).stream()
         .map(ticketMapper::toDto)
         .toList();
   }
 
-  @Transactional
+  // Pure read: no read-time advance (see listTickets). A just-expired ACTIVE may still show here
+  // until the scheduler advances it (≤1 sweep).
+  @Transactional(readOnly = true)
   @Override
   public CurrentTurnDto getCurrentTurn(UUID workId, User user) {
     Work work = workRepository.findById(workId)
         .orElseThrow(() -> new EntityNotFoundException("Work not found with id " + workId));
-    advance(work);
     Ticket active =
         ticketRepository.findFirstByWorkAndStatus(work, TicketStatus.ACTIVE).orElse(null);
     boolean myTurn = active != null && active.getHolder().equals(user);
@@ -150,7 +152,7 @@ public class TicketServiceImpl implements TicketService {
   @Transactional
   @Override
   public void advanceWork(UUID workId) {
-    Work work = workRepository.findById(workId)
+    Work work = workRepository.findByIdForUpdate(workId)
         .orElseThrow(() -> new EntityNotFoundException("Work not found with id " + workId));
     advance(work);
   }

@@ -36,6 +36,7 @@ import com.cu.collective_unconscious.repository.TicketRepository;
 import com.cu.collective_unconscious.repository.UserRepository;
 import com.cu.collective_unconscious.repository.WorkRepository;
 import com.cu.collective_unconscious.security.UserDetail;
+import com.cu.collective_unconscious.services.TicketService;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -44,7 +45,7 @@ import tools.jackson.databind.ObjectMapper;
  * Postgres. The per-endpoint contract lives in {@code TicketControllerTest}; this pins the
  * stateful multi-user flows: RobinRound A→B→A rotation with auto re-enqueue, the single-user
  * self-lock guard, FreeTurn's no-re-enqueue/manual-redraw, the submit gate + ownership, a real
- * WAITING-holder being blocked from drawing, and read-time timeout self-healing.
+ * WAITING-holder being blocked from drawing, and advanceWork() timeout self-healing.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -58,6 +59,7 @@ class TicketFlowIntegrationTest {
   @Autowired ContributionRepository contributionRepository;
   @Autowired ObjectMapper objectMapper;
   @Autowired org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+  @Autowired TicketService ticketService;
 
   @BeforeEach
   void clean() {
@@ -371,7 +373,7 @@ class TicketFlowIntegrationTest {
   // --- timeout, read-time dynamic judgment ------------------------------------
 
   @Test
-  void timeout_onRead_expiresActiveAndActivatesNext() throws Exception {
+  void timeout_onAdvance_expiresActiveAndActivatesNext() throws Exception {
     User a = persistUser();
     User b = persistUser();
     Work work = persistWork(a, TurnStyle.FREETURN); // FreeTurn: expiry just activates next, no re-enqueue
@@ -384,7 +386,9 @@ class TicketFlowIntegrationTest {
     active.setExpiresAt(LocalDateTime.now().minusMinutes(1));
     ticketRepository.save(active);
 
-    // A plain guest read triggers advance(): #1 -> EXPIRED, #2 (b) -> ACTIVE.
+    // Reads no longer self-heal; advanceWork() (what the scheduler calls) does the rotation.
+    ticketService.advanceWork(work.getId()); // #1 -> EXPIRED, #2 (b) -> ACTIVE
+
     mockMvc.perform(get(ticketsUrl(work)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$", org.hamcrest.Matchers.hasSize(2)))
@@ -398,16 +402,15 @@ class TicketFlowIntegrationTest {
   }
 
   @Test
-  void timeout_onRead_expiresActiveAndActivatesNext_RobinRound() throws Exception {
+  void timeout_onAdvance_expiresActiveAndActivatesNext_RobinRound() throws Exception {
     User a = persistUser();
     User b = persistUser();
-    Work work = persistWork(a, TurnStyle.ROBINROUND); // FreeTurn: expiry just activates next, no re-enqueue
+    Work work = persistWork(a, TurnStyle.ROBINROUND); // RobinRound: expiry activates next + tops up lookahead
 
     drawExpect(work, a, 201); // #1 ACTIVE (a)
-    drawExpect(work, b, 201); // #2 WAITING (b)
+    drawExpect(work, b, 201); // #2 WAITING (b); b's draw already generated the #3 (a) lookahead
 
-
-    // automatically add waiting ticket
+    // Pure read: the one-round lookahead (#3 a) was created during b's draw, not by this read.
     mockMvc.perform(get(ticketsUrl(work)))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$", org.hamcrest.Matchers.hasSize(3)))
@@ -424,7 +427,9 @@ class TicketFlowIntegrationTest {
     active.setExpiresAt(LocalDateTime.now().minusMinutes(1));
     ticketRepository.save(active);
 
-    // A plain guest read triggers advance(): #1 -> EXPIRED, #2 (b) -> ACTIVE.
+    // advanceWork(): #1 -> EXPIRED, #2 (b) -> ACTIVE, and top up the lookahead with #4 (b).
+    ticketService.advanceWork(work.getId());
+
     mockMvc.perform(get(ticketsUrl(work)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$", org.hamcrest.Matchers.hasSize(4)))

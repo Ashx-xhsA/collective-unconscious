@@ -38,11 +38,13 @@ import jakarta.persistence.EntityNotFoundException;
 /**
  * Unit test for {@link TicketServiceImpl} with repository + mapper mocked. Covers the pure decision
  * branches: draw guards (not-found / completed / access code / maxRounds), the RobinRound join rule
- * (already a participant), FreeTurn's "no two in a row" rule, and the read-time advance branches
- * (getCurrentTurn / listTickets / advanceWork).
+ * (already a participant), FreeTurn's "no two in a row" rule, and the advance branch (advanceWork).
+ * The write entry points (drawTicket / advanceWork) lock the aggregate root via
+ * {@code findByIdForUpdate}; the read entry points (getCurrentTurn / listTickets) are pure reads and
+ * no longer self-heal timeouts — that is advanceWork()'s / the scheduler's job.
  *
  * <p>The RobinRound round-based generation ({@code check()}), full A→B→A rotation, single-user
- * waiting, join-adds-to-authors and read-time timeout self-heal are stateful multi-query flows,
+ * waiting, join-adds-to-authors and scheduler timeout self-heal are stateful multi-query flows,
  * pinned end-to-end against real Postgres in {@code TicketFlowIntegrationTest}.
  */
 @ExtendWith(MockitoExtension.class)
@@ -89,7 +91,7 @@ class TicketServiceImplTest {
   @Test
   void drawTicket_unknownWork_throwsEntityNotFound() {
     UUID workId = UUID.randomUUID();
-    when(workRepository.findById(workId)).thenReturn(Optional.empty());
+    when(workRepository.findByIdForUpdate(workId)).thenReturn(Optional.empty());
 
     assertThatThrownBy(() -> service.drawTicket(workId, user("a"), null))
         .isInstanceOf(EntityNotFoundException.class);
@@ -98,7 +100,7 @@ class TicketServiceImplTest {
   @Test
   void drawTicket_workCompleted_throwsIllegalState_andSavesNothing() {
     Work work = work(TurnStyle.ROBINROUND, true, null);
-    when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
 
     assertThatThrownBy(() -> service.drawTicket(work.getId(), user("a"), null))
         .isInstanceOf(IllegalStateException.class);
@@ -108,7 +110,7 @@ class TicketServiceImplTest {
   @Test
   void drawTicket_accessCodeRequiredButMissing_throwsAccessDenied() {
     Work work = work(TurnStyle.ROBINROUND, false, "secret");
-    when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
 
     assertThatThrownBy(() -> service.drawTicket(work.getId(), user("a"), null))
         .isInstanceOf(AccessDeniedException.class);
@@ -118,7 +120,7 @@ class TicketServiceImplTest {
   @Test
   void drawTicket_accessCodeWrong_throwsAccessDenied() {
     Work work = work(TurnStyle.ROBINROUND, false, "secret");
-    when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
 
     assertThatThrownBy(() -> service.drawTicket(work.getId(), user("a"), "nope"))
         .isInstanceOf(AccessDeniedException.class);
@@ -129,7 +131,7 @@ class TicketServiceImplTest {
     Work work = Work.builder().id(UUID.randomUUID()).title("W").preface("p")
         .turnStyle(TurnStyle.FREETURN).ticketTtlSeconds(3600).maxRounds(2).build();
     User u = user("a");
-    when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
     stubEmptyQueue(work);
     when(ticketRepository.countByWorkAndStatusIn(eq(work), any())).thenReturn(2L); // already at cap
 
@@ -143,7 +145,7 @@ class TicketServiceImplTest {
     Work work = Work.builder().id(UUID.randomUUID()).title("W").preface("p")
         .turnStyle(TurnStyle.ROBINROUND).ticketTtlSeconds(3600).maxParticipants(2).build();
     User u = user("newbie");
-    when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
     stubEmptyQueue(work);
     when(ticketRepository.existsByWorkAndHolder(work, u)).thenReturn(false); // never drawn here
     when(ticketRepository.countDistinctHoldersByWork(work)).thenReturn(2L);  // already at the cap
@@ -158,7 +160,7 @@ class TicketServiceImplTest {
     Work work = work(TurnStyle.ROBINROUND, false, null);
     User u = user("a");
     work.getAuthors().add(u); // already joined the rotation
-    when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
     stubEmptyQueue(work);
 
     assertThatThrownBy(() -> service.drawTicket(work.getId(), u, null))
@@ -170,7 +172,7 @@ class TicketServiceImplTest {
   void drawTicket_freeTurn_callerHoldsMostRecentTicket_throwsIllegalState() {
     Work work = work(TurnStyle.FREETURN, false, null);
     User u = user("a");
-    when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
     stubEmptyQueue(work);
     when(ticketRepository.findFirstByWorkAndStatusInOrderByTicketNumberDesc(eq(work), any()))
         .thenReturn(Optional.of(ticket(work, u, 5, TicketStatus.CONSUMED)));
@@ -187,7 +189,7 @@ class TicketServiceImplTest {
     User other = user("other");
     Ticket active = ticket(work, other, 1, TicketStatus.ACTIVE);
     active.setExpiresAt(LocalDateTime.now().plusHours(1)); // not expired
-    when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
     when(ticketRepository.findFirstByWorkAndStatus(work, TicketStatus.ACTIVE))
         .thenReturn(Optional.of(active)); // advance sees a live ACTIVE -> no activation
     when(ticketRepository.findFirstByWorkAndStatusInOrderByTicketNumberDesc(eq(work), any()))
@@ -205,14 +207,15 @@ class TicketServiceImplTest {
     assertThat(saved.getStatus()).isEqualTo(TicketStatus.WAITING); // not activated: other is live
   }
 
-  // --- getCurrentTurn / advance branches -------------------------------------
+  // --- getCurrentTurn (pure read: no advance) --------------------------------
 
   @Test
   void getCurrentTurn_noActive_emptyQueue_notMyTurn() {
     Work work = work(TurnStyle.ROBINROUND, false, null);
     User u = user("a");
     when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
-    stubEmptyQueue(work);
+    when(ticketRepository.findFirstByWorkAndStatus(work, TicketStatus.ACTIVE))
+        .thenReturn(Optional.empty());
 
     CurrentTurnDto dto = service.getCurrentTurn(work.getId(), u);
 
@@ -256,21 +259,24 @@ class TicketServiceImplTest {
     assertThat(dto.getActiveHolderId()).isEqualTo(other.getId());
   }
 
+  // Reads no longer self-heal: advanceWork() does the expiry + activation, then the read reflects it.
   @Test
-  void getCurrentTurn_activeExpired_freeTurn_expiresItAndActivatesNext() {
+  void advanceWorkThenGetCurrentTurn_expiredIsRotated_freeTurn() {
     Work work = work(TurnStyle.FREETURN, false, null); // FreeTurn: no generation
     User a = user("a");
     User b = user("b");
     Ticket expired = ticket(work, a, 1, TicketStatus.ACTIVE);
     expired.setExpiresAt(LocalDateTime.now().minusMinutes(5)); // past
     Ticket next = ticket(work, b, 2, TicketStatus.WAITING);
-    when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work)); // advanceWork locks
+    when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));          // getCurrentTurn reads
     when(ticketRepository.findFirstByWorkAndStatus(work, TicketStatus.ACTIVE))
-        .thenReturn(Optional.of(expired))
-        .thenReturn(Optional.of(next));
+        .thenReturn(Optional.of(expired))  // advanceWork sees the timed-out ACTIVE
+        .thenReturn(Optional.of(next));    // getCurrentTurn then sees the newly ACTIVE
     when(ticketRepository.findFirstByWorkAndStatusOrderByTicketNumberAsc(work, TicketStatus.WAITING))
         .thenReturn(Optional.of(next));
 
+    service.advanceWork(work.getId());
     CurrentTurnDto dto = service.getCurrentTurn(work.getId(), b);
 
     assertThat(expired.getStatus()).isEqualTo(TicketStatus.EXPIRED);
@@ -289,18 +295,16 @@ class TicketServiceImplTest {
         .isInstanceOf(EntityNotFoundException.class);
   }
 
-  // --- listTickets ------------------------------------------------------------
+  // --- listTickets (pure read: no advance) -----------------------------------
 
   @Test
-  void listTickets_runsAdvanceThenMapsWholeQueueIncludingHistory() {
+  void listTickets_mapsWholeQueueIncludingHistory() {
     Work work = work(TurnStyle.FREETURN, false, null);
     User u = user("a");
     Ticket t1 = ticket(work, u, 1, TicketStatus.CONSUMED); // history is included
     Ticket t2 = ticket(work, u, 2, TicketStatus.ACTIVE);
     t2.setExpiresAt(LocalDateTime.now().plusHours(1));
     when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
-    when(ticketRepository.findFirstByWorkAndStatus(work, TicketStatus.ACTIVE))
-        .thenReturn(Optional.of(t2)); // advance sees a live ACTIVE -> no change
     when(ticketRepository.findByWorkWithHolderOrderByTicketNumberAsc(work))
         .thenReturn(List.of(t1, t2));
     when(ticketMapper.toDto(t1)).thenReturn(TicketDto.builder().ticketNumber(1).build());
@@ -325,7 +329,7 @@ class TicketServiceImplTest {
   @Test
   void advanceWork_unknownWork_throwsEntityNotFound() {
     UUID workId = UUID.randomUUID();
-    when(workRepository.findById(workId)).thenReturn(Optional.empty());
+    when(workRepository.findByIdForUpdate(workId)).thenReturn(Optional.empty());
 
     assertThatThrownBy(() -> service.advanceWork(workId))
         .isInstanceOf(EntityNotFoundException.class);
@@ -339,7 +343,7 @@ class TicketServiceImplTest {
     Ticket expired = ticket(work, a, 1, TicketStatus.ACTIVE);
     expired.setExpiresAt(LocalDateTime.now().minusMinutes(1));
     Ticket next = ticket(work, b, 2, TicketStatus.WAITING);
-    when(workRepository.findById(work.getId())).thenReturn(Optional.of(work));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
     when(ticketRepository.findFirstByWorkAndStatus(work, TicketStatus.ACTIVE))
         .thenReturn(Optional.of(expired));
     when(ticketRepository.findFirstByWorkAndStatusOrderByTicketNumberAsc(work, TicketStatus.WAITING))

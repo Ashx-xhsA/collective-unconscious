@@ -4,7 +4,10 @@ import com.cu.collective_unconscious.domain.entities.Tag;
 import com.cu.collective_unconscious.domain.entities.Work;
 import com.cu.collective_unconscious.domain.entities.enums.Visibility;
 
+import jakarta.persistence.LockModeType;
+
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -17,6 +20,11 @@ public interface WorkRepository extends JpaRepository<Work, UUID> {
   // Direct-by-id read: not visibility-gated (that filter only applies to the /works listing).
   @Query("SELECT w FROM Work w LEFT JOIN FETCH w.tags WHERE w.id = :id")
   Optional<Work> findWithTagsById(@Param("id") UUID id);
+
+  // SELECT ... FOR UPDATE: serialization point for ticket-state ops. Call within a transaction.
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("SELECT w FROM Work w WHERE w.id = :id")
+  Optional<Work> findByIdForUpdate(@Param("id") UUID id);
 
   // LEFT JOIN FETCH w.tags: load each work's tags in the same query (no N+1).
   // DISTINCT collapses the duplicate work rows a collection fetch produces.

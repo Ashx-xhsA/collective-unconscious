@@ -15,12 +15,10 @@ public interface TicketService {
   // idle). `accessCode` is required only when the work carries one.
   TicketDto drawTicket(UUID workId, User user, String accessCode);
 
-  // The whole ticket queue (all statuses, ordered by number) for a work. Guest-readable and
-  // user-independent (the DTO carries no caller-relative fields); runs advance() first so timeouts
-  // self-heal on read.
+  // The whole ticket queue (all statuses, ordered by number) for a work. Guest-readable, pure read.
   List<TicketDto> listTickets(UUID workId);
 
-  // Login-only "is it my turn" snapshot; runs advance() first.
+  // Login-only "is it my turn" snapshot. Pure read.
   CurrentTurnDto getCurrentTurn(UUID workId, User user);
 
   // Submit seam (plan step 5): fencing-check the caller's ACTIVE ticket, consume it, re-enqueue
