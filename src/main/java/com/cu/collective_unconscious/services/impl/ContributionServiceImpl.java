@@ -94,8 +94,8 @@ public class ContributionServiceImpl implements ContributionService {
   }
 
   // The single atomic entry point that turns a draft into formal, ordered content (§3.3).
-  // TODO(concurrency): naive max+1 can collide under concurrent submits against the
-  // (work_id, sequence_number) unique constraint; acceptable at this phase's low concurrency.
+  // Same-work submits are serialized by the ACTIVE ticket + fencing and by the work lock below, so
+  // the max+1 sequence_number can't collide concurrently.
   @Transactional
   @Override
   public ContributionDraftDto submit(UUID id, User user) {
@@ -112,6 +112,11 @@ public class ContributionServiceImpl implements ContributionService {
     }
 
     Work work = contribution.getWork();
+
+    // Lock the aggregate root before any ticket/sequence mutation, so this submit serializes with
+    // draws and the scheduler on the same work (same row as findByIdForUpdate elsewhere).
+    workRepository.findByIdForUpdate(work.getId())
+        .orElseThrow(() -> new EntityNotFoundException("Work not found with id " + work.getId()));
 
     // Ticket fencing: confirm the caller holds the ACTIVE, unexpired ticket, then consume it,
     // re-enqueue (RobinRound) and hand the turn onward — all in this same transaction, so if any

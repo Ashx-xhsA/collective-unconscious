@@ -321,6 +321,7 @@ class ContributionServiceImplTest {
     User author = author();
     Contribution draft = draftOn(work, author);
     when(contributionRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
     when(contributionRepository.findMaxSequenceNumber(work)).thenReturn(null);
     stubContributionSaveEcho();
 
@@ -335,6 +336,7 @@ class ContributionServiceImplTest {
     User author = author();
     Contribution draft = draftOn(work, author);
     when(contributionRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
     when(contributionRepository.findMaxSequenceNumber(work)).thenReturn(4);
     stubContributionSaveEcho();
 
@@ -349,6 +351,7 @@ class ContributionServiceImplTest {
     User author = author();
     Contribution draft = draftOn(work, author);
     when(contributionRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
     when(contributionRepository.findMaxSequenceNumber(work)).thenReturn(null);
     stubContributionSaveEcho();
 
@@ -380,6 +383,7 @@ class ContributionServiceImplTest {
     User author = author();
     Contribution draft = draftOn(work, author);
     when(contributionRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
 
     assertThatThrownBy(() -> service.submit(draft.getId(), author))
         .isInstanceOf(IllegalStateException.class);
@@ -394,6 +398,7 @@ class ContributionServiceImplTest {
     User author = author();
     Contribution draft = draftOn(work, author); // content is "some content" (> 3 chars)
     when(contributionRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
 
     assertThatThrownBy(() -> service.submit(draft.getId(), author))
         .isInstanceOf(IllegalArgumentException.class);
@@ -435,6 +440,7 @@ class ContributionServiceImplTest {
     User author = author();
     Contribution draft = draftOn(work, author);
     when(contributionRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
     when(contributionRepository.findMaxSequenceNumber(work)).thenReturn(null);
     stubContributionSaveEcho();
 
@@ -450,6 +456,7 @@ class ContributionServiceImplTest {
     User author = author();
     Contribution draft = draftOn(work, author);
     when(contributionRepository.findById(draft.getId())).thenReturn(Optional.of(draft));
+    when(workRepository.findByIdForUpdate(work.getId())).thenReturn(Optional.of(work));
     // e.g. "it's not your turn / your ticket expired" -> 409 from the ticket service.
     doThrow(new IllegalStateException("it is not your turn"))
         .when(ticketService).consumeActiveTicketForSubmit(work, author, draft);
