@@ -29,6 +29,6 @@ flowchart LR
 
 The backend is done. A **web frontend is in progress; aiming to launch soon.**
 
-Live API docs (Swagger UI): _link coming soon_
+[** Live API docs (Swagger UI) **](http://35.175.211.10:8080/swagger-ui/index.html)
 
 Stack: Spring Boot 4 / Java 25 / PostgreSQL / Redis.
